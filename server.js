@@ -1,71 +1,70 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 5500;
 
-// --- 1. CORE MIDDLEWARE ---
-app.use(helmet()); 
-app.use(cors({ origin: '*' })); // Allows connection from GitHub Pages, Vercel, or Localhost
-app.use(morgan('dev')); 
-app.use(express.json());
+// 1. OMNI-CORS: Accepts requests from ANY origin (Fixes your Github Codespace issues)
+app.use(cors({ origin: '*' }));
+app.use(express.json({ limit: '50mb' })); // Allows large payloads just in case
 
-// --- 2. THE FLEXIBLE DATABASE BRIDGE ---
-const connectDB = async () => {
-    const dbUri = process.env.MONGO_URI;
-    if (!dbUri) {
-        console.log("⚠️  Notice: MONGO_URI variable not set. Running in API-only mode.");
-        return;
-    }
+// 2. MONGODB CONNECTION
+mongoose.connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+}).then(() => console.log('✅ Nueralab Database Connected'))
+  .catch(err => console.error('❌ DB Connection Error:', err));
+
+// 3. THE MAGIC ROUTES (Dynamic Schema-less CRUD)
+
+// POST: Create or Update Data in ANY Collection
+app.post('/api/v1/sync/:collection', async (req, res) => {
     try {
-        await mongoose.connect(dbUri);
-        console.log("🧬 Neural Database: STABLE & CONNECTED");
-    } catch (err) {
-        console.error("❌ Database Connection Failed:", err.message);
+        const collectionName = req.params.collection;
+        const data = req.body;
+        
+        // We require a 'uid' so we know who the data belongs to
+        if (!data.uid) {
+            return res.status(400).json({ error: "Missing 'uid' in JSON payload" });
+        }
+
+        // Access the raw MongoDB driver to bypass strict Mongoose schemas
+        const db = mongoose.connection.db;
+        
+        // UPSERT LOGIC: Find document by uid. If exists, update it. If not, create it.
+        const result = await db.collection(collectionName).updateOne(
+            { uid: data.uid }, 
+            { $set: data }, 
+            { upsert: true }
+        );
+        
+        res.status(200).json({ success: true, message: `Data synced to ${collectionName}`, result });
+    } catch (error) {
+        console.error(`Sync Error [${req.params.collection}]:`, error);
+        res.status(500).json({ error: "Internal Server Error" });
     }
-};
-connectDB();
-
-// --- 3. THE "UNIVERSAL" ROUTES ---
-
-// Health Check (Check this in your browser)
-app.get('/', (req, res) => {
-    res.status(200).json({
-        status: "Online",
-        bridge: "NueraLab Universal v2.0",
-        db_status: mongoose.connection.readyState === 1 ? "Connected" : "Not Linked",
-        timestamp: new Date().toISOString()
-    });
 });
 
-// Universal Data Receiver (Handles Login, Lab Research, or AI Prompts)
-// You can use any category name: /api/v1/sync/login or /api/v1/sync/research
-app.post('/api/v1/sync/:category', async (req, res) => {
-    const { category } = req.params;
-    const data = req.body;
-
-    console.log(`📥 Received [${category}] Data:`, data);
-
-    // This is where you can later add logic to save to specific Collections
-    res.status(200).json({
-        success: true,
-        node: "Render-Cloud-SG",
-        received_as: category,
-        message: "Neural Bridge sync complete.",
-        data_echo: data
-    });
+// GET: Retrieve Data from ANY Collection by UID
+app.get('/api/v1/sync/:collection/:uid', async (req, res) => {
+    try {
+        const db = mongoose.connection.db;
+        const result = await db.collection(req.params.collection).findOne({ uid: req.params.uid });
+        
+        if (!result) return res.status(404).json({ error: "Data not found" });
+        
+        res.status(200).json(result);
+    } catch (error) {
+        res.status(500).json({ error: "Internal Server Error" });
+    }
 });
 
-// --- 4. SAFETY NET ---
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ error: "Bridge Interruption", details: err.message });
+// 4. FALLBACK ROUTE
+app.use((req, res) => {
+    res.status(404).json({ error: "Nueralab API endpoint not found. Check your URL." });
 });
 
-app.listen(PORT, () => {
-    console.log(`🚀 NueraLab Bridge Active on Port ${PORT}`);
-});
+// 5. IGNITION
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🚀 Nueralab Core online on port ${PORT}`));
