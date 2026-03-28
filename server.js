@@ -15,8 +15,9 @@ app.use(express.json({ limit: '50mb' })); // Allows large payloads just in case
 // POST: Create or Update Data in ANY Collection
 app.post('/api/v1/sync/:collection', async (req, res) => {
     try {
-        const collectionName = req.params.collection;
-        const data = req.body;
+        if (!mongoose.connection.db) {
+    return res.status(503).json({ error: "Database not ready" });
+}
         
         // We require a 'uid' so we know who the data belongs to
         if (!data.uid) {
