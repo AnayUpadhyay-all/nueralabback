@@ -9,12 +9,6 @@ const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' })); // Allows large payloads just in case
 
-// 2. MONGODB CONNECTION
-mongoose.connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-}).then(() => console.log('✅ Nueralab Database Connected'))
-  .catch(err => console.error('❌ DB Connection Error:', err));
 
 // 3. THE MAGIC ROUTES (Dynamic Schema-less CRUD)
 
@@ -65,6 +59,17 @@ app.use((req, res) => {
     res.status(404).json({ error: "Nueralab API endpoint not found. Check your URL." });
 });
 
-// 5. IGNITION
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Nueralab Core online on port ${PORT}`));
+// 5. IGNITION (FIXED FOR RENDER)
+const PORT = process.env.PORT || 10000;
+
+mongoose.connect(process.env.MONGO_URI)
+.then(() => {
+    console.log('✅ Nueralab Database Connected');
+
+    app.listen(PORT, () => {
+        console.log(`🚀 Nueralab Core online on port ${PORT}`);
+    });
+})
+.catch(err => {
+    console.error('❌ DB Connection Error:', err);
+});
