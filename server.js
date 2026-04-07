@@ -18,7 +18,7 @@ app.post('/api/v1/sync/:collection', async (req, res) => {
         }
 
         const collectionName = req.params.collection;
-        const data = req.body;
+        let data = req.body; // Changed to 'let' so we can modify it
 
         if (!data.uid) {
             return res.status(400).json({ error: "Missing 'uid' in JSON payload" });
@@ -27,6 +27,23 @@ app.post('/api/v1/sync/:collection', async (req, res) => {
         // Access the raw MongoDB driver to bypass strict Mongoose schemas
         const db = mongoose.connection.db;
         
+        // --- NEW: AUTO-INITIALIZE NEURAL DATA FOR NEW USERS ---
+        if (collectionName === 'user-profiles') {
+            const existingUser = await db.collection(collectionName).findOne({ uid: data.uid });
+            
+            // If this is their first time logging in, inject the default learning ecosystem stats!
+            if (!existingUser) {
+                data = {
+                    ...data,
+                    overallProgress: 0,
+                    nodesUnlocked: 1,
+                    moduleProgress: { web: 0, js: 0, react: 0, node: 0, db: 0 },
+                    // Give them some starter activity data so the bar chart looks alive on Day 1
+                    activityData: [5, 12, 8, 20, 15, 30, 25, 45, 35, 55, 50, 75] 
+                };
+            }
+        }
+
         // UPSERT LOGIC: Find document by uid. If exists, update it. If not, create it.
         const result = await db.collection(collectionName).updateOne(
             { uid: data.uid }, 
