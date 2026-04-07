@@ -1,4 +1,4 @@
-require('dotenv').config(); // Required to read your MONGO_URI and OPENAI_API_KEY
+require('dotenv').config(); // Required for MONGO_URI and OPENROUTER_API_KEY
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -9,7 +9,7 @@ const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' })); 
 
-// 2. POST: Create or Update Data in ANY Collection
+// 2. POST: Sync Data
 app.post('/api/v1/sync/:collection', async (req, res) => {
     try {
         if (mongoose.connection.readyState !== 1) {
@@ -46,11 +46,7 @@ app.post('/api/v1/sync/:collection', async (req, res) => {
             { upsert: true }
         );
         
-        res.status(200).json({
-            success: true,
-            message: `Data synced to ${collectionName}`,
-            result
-        });
+        res.status(200).json({ success: true, message: `Data synced to ${collectionName}`, result });
 
     } catch (error) {
         console.error(`Sync Error [${req.params.collection}]:`, error);
@@ -58,7 +54,7 @@ app.post('/api/v1/sync/:collection', async (req, res) => {
     }
 });
 
-// 3. GET: Retrieve Data from ANY Collection by UID
+// 3. GET: Retrieve Data
 app.get('/api/v1/sync/:collection/:uid', async (req, res) => {
     try {
         if (mongoose.connection.readyState !== 1) {
@@ -68,55 +64,50 @@ app.get('/api/v1/sync/:collection/:uid', async (req, res) => {
         const db = mongoose.connection.db;
         const result = await db.collection(req.params.collection).findOne({ uid: req.params.uid });
         
-        if (!result) {
-            return res.status(404).json({ error: "Data not found" });
-        }
+        if (!result) return res.status(404).json({ error: "Data not found" });
 
         res.status(200).json(result);
-
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: "Internal Server Error" });
     }
 });
 
-// --- 4. SECURE AI CHAT ROUTE (OpenAI Proxy) ---
+// --- 4. SECURE AI CHAT ROUTE (Open Router Proxy) ---
 app.post('/api/v1/ai/chat', async (req, res) => {
     try {
-        const apiKey = process.env.OPENAI_API_KEY;
+        // Use your Open Router Key from Render Env Variables
+        const apiKey = process.env.OPENROUTER_API_KEY;
         
         if (!apiKey) {
-            console.error("OpenAI API Key is missing in environment variables.");
+            console.error("Open Router API Key is missing in environment variables.");
             return res.status(500).json({ error: "AI configuration error on server." });
         }
 
         const { messages } = req.body;
 
-        if (!messages || !Array.isArray(messages)) {
-            return res.status(400).json({ error: "Invalid messages format." });
-        }
-
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
+                'Authorization': `Bearer ${apiKey}`,
+                'HTTP-Referer': 'https://nueralab.io', // Required by some Open Router models
+                'X-Title': 'NueraLab Intelligence'
             },
             body: JSON.stringify({
-                model: "gpt-4o", // You can use "gpt-4o" or "gpt-3.5-turbo"
-                messages: messages,
-                temperature: 0.7
+                model: "openai/gpt-4o", // You can switch this to any Open Router model
+                messages: messages
             })
         });
 
         const data = await response.json();
 
         if (data.error) {
-            console.error("OpenAI API Error:", data.error);
+            console.error("Open Router API Error:", data.error);
             return res.status(500).json({ error: data.error.message });
         }
 
-        // Return just the text reply to the frontend
+        // Return reply to frontend
         res.status(200).json({
             reply: data.choices[0].message.content
         });
@@ -129,7 +120,7 @@ app.post('/api/v1/ai/chat', async (req, res) => {
 
 // 5. FALLBACK ROUTE
 app.use((req, res) => {
-    res.status(404).json({ error: "Nueralab API endpoint not found. Check your URL." });
+    res.status(404).json({ error: "Nueralab API endpoint not found." });
 });
 
 // 6. IGNITION
@@ -137,9 +128,9 @@ const PORT = process.env.PORT || 10000;
 
 mongoose.connect(process.env.MONGO_URI)
     .then(() => {
-        console.log("MongoDB connected successfully for Nuera Lab");
+        console.log("MongoDB connected for Nuera Lab");
         app.listen(PORT, () => {
-            console.log(`Neural Core API (Sync + AI) running on port ${PORT}`);
+            console.log(`Neural Core API running on port ${PORT}`);
         });
     })
     .catch((err) => {
