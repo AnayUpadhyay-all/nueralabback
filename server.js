@@ -1,4 +1,4 @@
-require('dotenv').config(); // Required to read your MONGO_URI
+require('dotenv').config(); // Required to read your MONGO_URI and OPENAI_API_KEY
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -12,46 +12,40 @@ app.use(express.json({ limit: '50mb' }));
 // 2. POST: Create or Update Data in ANY Collection
 app.post('/api/v1/sync/:collection', async (req, res) => {
     try {
-        // Use readyState to check if DB is connected (1 = connected)
         if (mongoose.connection.readyState !== 1) {
             return res.status(503).json({ error: "Database not ready" });
         }
 
         const collectionName = req.params.collection;
-        let data = req.body; // Changed to 'let' so we can modify it
+        let data = req.body; 
 
         if (!data.uid) {
             return res.status(400).json({ error: "Missing 'uid' in JSON payload" });
         }
 
-        // Access the raw MongoDB driver to bypass strict Mongoose schemas
         const db = mongoose.connection.db;
         
-        // --- NEW: AUTO-INITIALIZE NEURAL DATA FOR NEW USERS ---
+        // --- AUTO-INITIALIZE NEURAL DATA FOR NEW USERS ---
         if (collectionName === 'user-profiles') {
             const existingUser = await db.collection(collectionName).findOne({ uid: data.uid });
             
-            // If this is their first time logging in, inject the default learning ecosystem stats!
             if (!existingUser) {
                 data = {
                     ...data,
                     overallProgress: 0,
                     nodesUnlocked: 1,
                     moduleProgress: { web: 0, js: 0, react: 0, node: 0, db: 0 },
-                    // Give them some starter activity data so the bar chart looks alive on Day 1
                     activityData: [5, 12, 8, 20, 15, 30, 25, 45, 35, 55, 50, 75] 
                 };
             }
         }
 
-        // UPSERT LOGIC: Find document by uid. If exists, update it. If not, create it.
         const result = await db.collection(collectionName).updateOne(
             { uid: data.uid }, 
             { $set: data }, 
             { upsert: true }
         );
         
-        // Single response
         res.status(200).json({
             success: true,
             message: `Data synced to ${collectionName}`,
@@ -86,20 +80,66 @@ app.get('/api/v1/sync/:collection/:uid', async (req, res) => {
     }
 });
 
-// 4. FALLBACK ROUTE
+// --- 4. SECURE AI CHAT ROUTE (OpenAI Proxy) ---
+app.post('/api/v1/ai/chat', async (req, res) => {
+    try {
+        const apiKey = process.env.OPENAI_API_KEY;
+        
+        if (!apiKey) {
+            console.error("OpenAI API Key is missing in environment variables.");
+            return res.status(500).json({ error: "AI configuration error on server." });
+        }
+
+        const { messages } = req.body;
+
+        if (!messages || !Array.isArray(messages)) {
+            return res.status(400).json({ error: "Invalid messages format." });
+        }
+
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: "gpt-4o", // You can use "gpt-4o" or "gpt-3.5-turbo"
+                messages: messages,
+                temperature: 0.7
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.error) {
+            console.error("OpenAI API Error:", data.error);
+            return res.status(500).json({ error: data.error.message });
+        }
+
+        // Return just the text reply to the frontend
+        res.status(200).json({
+            reply: data.choices[0].message.content
+        });
+
+    } catch (error) {
+        console.error("AI Proxy Route Error:", error);
+        res.status(500).json({ error: "Internal Server Error during AI processing" });
+    }
+});
+
+// 5. FALLBACK ROUTE
 app.use((req, res) => {
     res.status(404).json({ error: "Nueralab API endpoint not found. Check your URL." });
 });
 
-// 5. IGNITION (Fixed for Render)
+// 6. IGNITION
 const PORT = process.env.PORT || 10000;
 
-// Connect to MongoDB first, THEN start listening for requests
 mongoose.connect(process.env.MONGO_URI)
     .then(() => {
         console.log("MongoDB connected successfully for Nuera Lab");
         app.listen(PORT, () => {
-            console.log(`Neural Core API running on port ${PORT}`);
+            console.log(`Neural Core API (Sync + AI) running on port ${PORT}`);
         });
     })
     .catch((err) => {
