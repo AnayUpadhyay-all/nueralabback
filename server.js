@@ -85,8 +85,8 @@ app.post('/api/v1/ai/chat', async (req, res) => {
 
         const { systemInstruction, contents } = req.body;
 
-        // Official Google Gemini Endpoint (1.5 Flash is insanely fast and free)
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+        // Official Google Gemini Endpoint (Upgraded to 2.5 Flash)
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
         
         const response = await fetch(url, {
             method: 'POST',
