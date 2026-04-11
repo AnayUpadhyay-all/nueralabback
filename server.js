@@ -1,4 +1,4 @@
-require('dotenv').config(); // Required for MONGO_URI and OPENROUTER_API_KEY
+require('dotenv').config(); // Required for MONGO_URI and GEMINI_API_KEY
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -73,43 +73,39 @@ app.get('/api/v1/sync/:collection/:uid', async (req, res) => {
     }
 });
 
-// --- 4. SECURE AI CHAT ROUTE (Open Router Proxy) ---
+// --- 4. SECURE AI CHAT ROUTE (Official Google Gemini Proxy) ---
 app.post('/api/v1/ai/chat', async (req, res) => {
     try {
-        // Use your Open Router Key from Render Env Variables
-        const apiKey = process.env.OPENROUTER_API_KEY;
+        const apiKey = process.env.GEMINI_API_KEY;
         
         if (!apiKey) {
-            console.error("Open Router API Key is missing in environment variables.");
+            console.error("Gemini API Key is missing in environment variables.");
             return res.status(500).json({ error: "AI configuration error on server." });
         }
 
-        const { messages } = req.body;
+        const { systemInstruction, contents } = req.body;
 
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        // Official Google Gemini Endpoint (1.5 Flash is insanely fast and free)
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+        
+        const response = await fetch(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-                'HTTP-Referer': 'https://nueralab.io', // Required by some Open Router models
-                'X-Title': 'NueraLab Intelligence'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: "openai/gpt-4o", // You can switch this to any Open Router model
-                messages: messages
+                systemInstruction: { parts: [{ text: systemInstruction }] },
+                contents: contents
             })
         });
 
         const data = await response.json();
 
         if (data.error) {
-            console.error("Open Router API Error:", data.error);
+            console.error("Gemini API Error:", data.error);
             return res.status(500).json({ error: data.error.message });
         }
 
-        // Return reply to frontend
         res.status(200).json({
-            reply: data.choices[0].message.content
+            reply: data.candidates[0].content.parts[0].text
         });
 
     } catch (error) {
