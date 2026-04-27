@@ -9,7 +9,7 @@ const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' })); 
 
-// 2. POST: Sync Data
+// 2. POST: Sync Data (UPDATED WITH PREMIUM LOGIC)
 app.post('/api/v1/sync/:collection', async (req, res) => {
     try {
         if (mongoose.connection.readyState !== 1) {
@@ -19,9 +19,14 @@ app.post('/api/v1/sync/:collection', async (req, res) => {
         const collectionName = req.params.collection;
         let data = req.body; 
 
-        if (!data.uid) {
-            return res.status(400).json({ error: "Missing 'uid' in JSON payload" });
+        // SAFEGUARD: Accept 'userId' or 'uid' from frontend
+        const uniqueId = data.uid || data.userId;
+        if (!uniqueId) {
+            return res.status(400).json({ error: "Missing 'uid' or 'userId' in JSON payload" });
         }
+        
+        // Normalize to uid for the database query
+        data.uid = uniqueId; 
 
         const db = mongoose.connection.db;
         
@@ -30,12 +35,20 @@ app.post('/api/v1/sync/:collection', async (req, res) => {
             const existingUser = await db.collection(collectionName).findOne({ uid: data.uid });
             
             if (!existingUser) {
+                // ==========================================
+                // NEW LOGIC: FIRST 10 USERS GET PREMIUM
+                // ==========================================
+                const totalUsers = await db.collection(collectionName).countDocuments();
+                const assignedPremium = totalUsers < 10; // True if 0-9 users exist, False otherwise
+
                 data = {
                     ...data,
+                    isPremium: assignedPremium, // Save the Premium flag
                     overallProgress: 0,
                     nodesUnlocked: 1,
                     moduleProgress: { web: 0, js: 0, react: 0, node: 0, db: 0 },
-                    activityData: [5, 12, 8, 20, 15, 30, 25, 45, 35, 55, 50, 75] 
+                    activityData: [5, 12, 8, 20, 15, 30, 25, 45, 35, 55, 50, 75],
+                    registeredAt: new Date().toISOString() // Good practice to timestamp
                 };
             }
         }
@@ -46,7 +59,13 @@ app.post('/api/v1/sync/:collection', async (req, res) => {
             { upsert: true }
         );
         
-        res.status(200).json({ success: true, message: `Data synced to ${collectionName}`, result });
+        // Send back success AND the isPremium status so the frontend can show the correct message
+        res.status(200).json({ 
+            success: true, 
+            message: `Data synced to ${collectionName}`, 
+            isPremium: data.isPremium || false,
+            result 
+        });
 
     } catch (error) {
         console.error(`Sync Error [${req.params.collection}]:`, error);
