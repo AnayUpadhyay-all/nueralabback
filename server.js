@@ -275,6 +275,9 @@ mongoose.connect(process.env.MONGO_URI)
         console.log("MongoDB connected for Nuera Lab");
         app.listen(PORT, () => {
             console.log(`Neural Core API running on port ${PORT}`);
+            console.log(`\n=========================================`);
+            console.log(`🟢 HEALTH CHECK URL: http://localhost:${PORT} `);
+            console.log(`=========================================\n`);
         });
     })
     .catch((err) => {
