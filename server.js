@@ -9,6 +9,22 @@ const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' })); 
 
+// ==========================================
+// NEW: HEALTH CHECK ROUTE (Crucial for Render)
+// Visit your-render-url.onrender.com/ to check status
+// ==========================================
+app.get('/', (req, res) => {
+    // mongoose.connection.readyState: 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
+    const dbState = mongoose.connection.readyState;
+    const dbStatus = dbState === 1 ? 'Connected 🟢' : (dbState === 2 ? 'Connecting 🟡' : 'Disconnected 🔴');
+    
+    res.status(200).json({
+        server: "Online 🟢",
+        database: dbStatus,
+        message: "Nuera Lab API is running successfully."
+    });
+});
+
 // 2. POST: Sync Data (UPDATED WITH PREMIUM LOGIC)
 app.post('/api/v1/sync/:collection', async (req, res) => {
     try {
@@ -87,7 +103,7 @@ app.get('/api/v1/sync/:collection/:uid', async (req, res) => {
 
         res.status(200).json(result);
     } catch (error) {
-        console.error(error);
+        console.error("Retrieve Error:", error);
         res.status(500).json({ error: "Internal Server Error" });
     }
 });
@@ -140,6 +156,11 @@ app.use((req, res) => {
 
 // 6. IGNITION
 const PORT = process.env.PORT || 10000;
+
+if (!process.env.MONGO_URI) {
+    console.error("CRITICAL ERROR: MONGO_URI is not defined in environment variables.");
+    process.exit(1); // Stop the server if there's no database URI
+}
 
 mongoose.connect(process.env.MONGO_URI)
     .then(() => {
