@@ -10,11 +10,26 @@ app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' })); 
 
 // ==========================================
-// NEW: HEALTH CHECK ROUTE (Crucial for Render)
-// Visit your-render-url.onrender.com/ to check status
+// HELPER: DECODE FIREBASE TOKEN
+// Extracts the UID from the frontend's Bearer token
+// ==========================================
+const getUidFromToken = (req) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+        const token = authHeader.split(' ')[1];
+        // Decode base64 JWT payload safely
+        const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('utf-8'));
+        return payload.user_id || payload.sub;
+    } catch (error) {
+        return null;
+    }
+};
+
+// ==========================================
+// HEALTH CHECK ROUTE 
 // ==========================================
 app.get('/', (req, res) => {
-    // mongoose.connection.readyState: 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
     const dbState = mongoose.connection.readyState;
     const dbStatus = dbState === 1 ? 'Connected 🟢' : (dbState === 2 ? 'Connecting 🟡' : 'Disconnected 🔴');
     
@@ -25,7 +40,97 @@ app.get('/', (req, res) => {
     });
 });
 
-// 2. POST: Sync Data (UPDATED WITH PREMIUM LOGIC)
+// ==========================================
+// USER STATUS (For Frontend Wallet & Marketplace UI)
+// ==========================================
+app.get('/api/user/status', async (req, res) => {
+    try {
+        const uid = getUidFromToken(req);
+        if (!uid) return res.status(401).json({ error: "Unauthorized. Missing or invalid token." });
+
+        if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "DB not ready" });
+
+        const user = await mongoose.connection.db.collection('user-profiles').findOne({ uid: uid });
+        
+        if (!user) {
+            return res.json({ balance: 0, purchasedItems: [], isPremium: false });
+        }
+
+        res.status(200).json({
+            balance: user.balance || 0,
+            purchasedItems: user.purchasedItems || [],
+            isPremium: user.isPremium || false
+        });
+    } catch (error) {
+        console.error("User Status Error:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+// ==========================================
+// MARKETPLACE PURCHASE ROUTE
+// ==========================================
+app.post('/api/marketplace/purchase', async (req, res) => {
+    try {
+        const uid = getUidFromToken(req);
+        if (!uid) return res.status(401).json({ success: false, message: "Please log in to purchase." });
+
+        const { item, cost } = req.body;
+        const db = mongoose.connection.db;
+
+        const user = await db.collection('user-profiles').findOne({ uid: uid });
+        if (!user) return res.status(404).json({ success: false, message: "User profile not found." });
+
+        const currentBalance = user.balance || 0;
+        const purchasedItems = user.purchasedItems || [];
+
+        // Check if already purchased
+        if (purchasedItems.includes(item)) {
+            return res.json({ success: true, message: "Item already owned.", newBalance: currentBalance });
+        }
+
+        // Check balance
+        if (currentBalance < cost) {
+            return res.status(400).json({ success: false, message: "Transaction rejected: Insufficient NUX." });
+        }
+
+        // Deduct NUX and add item
+        await db.collection('user-profiles').updateOne(
+            { uid: uid },
+            { 
+                $inc: { balance: -cost },
+                $push: { purchasedItems: item }
+            }
+        );
+
+        res.status(200).json({ 
+            success: true, 
+            message: "Purchase successful", 
+            newBalance: currentBalance - cost 
+        });
+
+    } catch (error) {
+        console.error("Marketplace Error:", error);
+        res.status(500).json({ success: false, message: "Internal server error during transaction." });
+    }
+});
+
+// ==========================================
+// CHECKOUT/PRO REDIRECT ROUTE
+// ==========================================
+app.get('/api/checkout/pro', async (req, res) => {
+    res.send(`
+        <div style="font-family: sans-serif; text-align: center; padding: 50px;">
+            <h2>Secure Payment Gateway</h2>
+            <p>Stripe checkout integration goes here.</p>
+            <button onclick="window.history.back()">Go Back</button>
+        </div>
+    `);
+});
+
+// ==========================================
+// POST: Sync Data
+// ==========================================
 app.post('/api/v1/sync/:collection', async (req, res) => {
     try {
         if (mongoose.connection.readyState !== 1) {
@@ -35,36 +140,33 @@ app.post('/api/v1/sync/:collection', async (req, res) => {
         const collectionName = req.params.collection;
         let data = req.body; 
 
-        // SAFEGUARD: Accept 'userId' or 'uid' from frontend
         const uniqueId = data.uid || data.userId;
         if (!uniqueId) {
             return res.status(400).json({ error: "Missing 'uid' or 'userId' in JSON payload" });
         }
         
-        // Normalize to uid for the database query
         data.uid = uniqueId; 
 
         const db = mongoose.connection.db;
         
-        // --- AUTO-INITIALIZE NEURAL DATA FOR NEW USERS ---
+        // AUTO-INITIALIZE NEURAL DATA FOR NEW USERS
         if (collectionName === 'user-profiles') {
             const existingUser = await db.collection(collectionName).findOne({ uid: data.uid });
             
             if (!existingUser) {
-                // ==========================================
-                // NEW LOGIC: FIRST 10 USERS GET PREMIUM
-                // ==========================================
                 const totalUsers = await db.collection(collectionName).countDocuments();
-                const assignedPremium = totalUsers < 10; // True if 0-9 users exist, False otherwise
+                const assignedPremium = totalUsers < 10;
 
                 data = {
                     ...data,
-                    isPremium: assignedPremium, // Save the Premium flag
+                    isPremium: assignedPremium,
+                    balance: 1500, // <--- GIVING 1500 NUX TO NEW USERS SO THEY CAN BUY THINGS
+                    purchasedItems: [], // <--- Initialize empty items array
                     overallProgress: 0,
                     nodesUnlocked: 1,
                     moduleProgress: { web: 0, js: 0, react: 0, node: 0, db: 0 },
                     activityData: [5, 12, 8, 20, 15, 30, 25, 45, 35, 55, 50, 75],
-                    registeredAt: new Date().toISOString() // Good practice to timestamp
+                    registeredAt: new Date().toISOString()
                 };
             }
         }
@@ -75,7 +177,6 @@ app.post('/api/v1/sync/:collection', async (req, res) => {
             { upsert: true }
         );
         
-        // Send back success AND the isPremium status so the frontend can show the correct message
         res.status(200).json({ 
             success: true, 
             message: `Data synced to ${collectionName}`, 
@@ -89,7 +190,9 @@ app.post('/api/v1/sync/:collection', async (req, res) => {
     }
 });
 
-// 3. GET: Retrieve Data
+// ==========================================
+// GET: Retrieve Data
+// ==========================================
 app.get('/api/v1/sync/:collection/:uid', async (req, res) => {
     try {
         if (mongoose.connection.readyState !== 1) {
@@ -108,7 +211,9 @@ app.get('/api/v1/sync/:collection/:uid', async (req, res) => {
     }
 });
 
-// --- 4. SECURE AI CHAT ROUTE (Official Google Gemini Proxy) ---
+// ==========================================
+// SECURE AI CHAT ROUTE
+// ==========================================
 app.post('/api/v1/ai/chat', async (req, res) => {
     try {
         const apiKey = process.env.GEMINI_API_KEY;
@@ -120,7 +225,6 @@ app.post('/api/v1/ai/chat', async (req, res) => {
 
         const { systemInstruction, contents } = req.body;
 
-        // Official Google Gemini Endpoint (Upgraded to 2.5 Flash)
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
         
         const response = await fetch(url, {
@@ -149,17 +253,21 @@ app.post('/api/v1/ai/chat', async (req, res) => {
     }
 });
 
-// 5. FALLBACK ROUTE
+// ==========================================
+// FALLBACK ROUTE
+// ==========================================
 app.use((req, res) => {
     res.status(404).json({ error: "Nueralab API endpoint not found." });
 });
 
-// 6. IGNITION
+// ==========================================
+// IGNITION
+// ==========================================
 const PORT = process.env.PORT || 10000;
 
 if (!process.env.MONGO_URI) {
     console.error("CRITICAL ERROR: MONGO_URI is not defined in environment variables.");
-    process.exit(1); // Stop the server if there's no database URI
+    process.exit(1); 
 }
 
 mongoose.connect(process.env.MONGO_URI)
