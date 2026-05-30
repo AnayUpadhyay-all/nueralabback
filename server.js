@@ -5,8 +5,14 @@ const mongoose = require('mongoose');
 
 const app = express();
 
-// 1. OMNI-CORS: Accepts requests from ANY origin
-app.use(cors({ origin: '*' }));
+// 1. SECURE CORS: Accepts requests ONLY from authorized Nuera Lab domains
+app.use(cors({ 
+    origin: [
+        'https://anayupadhyay-all.github.io', // Live Nuera Lab Deployment
+        'http://127.0.0.1:5500',              // Local VS Code Live Server
+        'http://localhost:5500'               // Localhost fallback
+    ] 
+}));
 app.use(express.json({ limit: '50mb' })); 
 
 // ==========================================
