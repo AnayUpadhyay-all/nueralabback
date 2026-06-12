@@ -37,10 +37,10 @@ const getUidFromToken = (req) => {
 // ==========================================
 app.get('/', (req, res) => {
     const dbState = mongoose.connection.readyState;
-    const dbStatus = dbState === 1 ? 'Connected 🟢' : (dbState === 2 ? 'Connecting 🟡' : 'Disconnected 🔴');
+    const dbStatus = dbState === 1 ? 'Connected 泙' : (dbState === 2 ? 'Connecting 泯' : 'Disconnected 閥');
     
     res.status(200).json({
-        server: "Online 🟢",
+        server: "Online 泙",
         database: dbStatus,
         message: "Nuera Lab API is running successfully."
     });
@@ -70,6 +70,43 @@ app.get('/api/user/status', async (req, res) => {
     } catch (error) {
         console.error("User Status Error:", error);
         res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+// ==========================================
+// CONFIRM CREDENTIALS (Saves unique ID to DB)
+// ==========================================
+app.post('/api/user/confirm-credential', async (req, res) => {
+    try {
+        const uid = getUidFromToken(req);
+        if (!uid) return res.status(401).json({ success: false, message: "Unauthorized. Missing or invalid token." });
+
+        if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: "DB not ready" });
+
+        const { credentialId, verifiedAt } = req.body;
+        
+        if (!credentialId) {
+            return res.status(400).json({ success: false, message: "Credential ID is required." });
+        }
+
+        const db = mongoose.connection.db;
+        
+        // Update the user profile with the generated credential ID
+        await db.collection('user-profiles').updateOne(
+            { uid: uid }, 
+            { 
+                $set: { 
+                    baseCredential: credentialId, 
+                    baseVerifiedAt: verifiedAt || new Date().toISOString()
+                } 
+            },
+            { upsert: true }
+        );
+
+        res.status(200).json({ success: true, message: "Credential written to MongoDB successfully." });
+    } catch (error) {
+        console.error("Confirm Credential Error:", error);
+        res.status(500).json({ success: false, error: "Internal Server Error" });
     }
 });
 
@@ -282,7 +319,7 @@ mongoose.connect(process.env.MONGO_URI)
         app.listen(PORT, () => {
             console.log(`Neural Core API running on port ${PORT}`);
             console.log(`\n=========================================`);
-            console.log(`🟢 HEALTH CHECK URL: http://localhost:${PORT} `);
+            console.log(`泙 HEALTH CHECK URL: http://localhost:${PORT} `);
             console.log(`=========================================\n`);
         });
     })
